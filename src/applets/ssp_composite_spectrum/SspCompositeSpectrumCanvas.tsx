@@ -96,21 +96,14 @@ function newRowFromAsset(data: LoadedSspAsset, massMsun: number): Row {
   };
 }
 
-function formatAgeOption(yr: number): string {
-  if (yr >= 1e9) {
-    return `${(yr / 1e9).toPrecision(4)} Gyr`;
-  }
-  if (yr >= 1e6) {
-    return `${(yr / 1e6).toPrecision(4)} Myr`;
-  }
-  return `${yr.toExponential(2)} yr`;
+/** Short label for age dropdown (one value, scientific). */
+function formatAgeDropdownLabel(yr: number): string {
+  return `${yr.toExponential(1)} yr`;
 }
 
-function formatMetallicityOption(z: number): string {
-  if (z >= 0.001) {
-    return z.toFixed(4);
-  }
-  return z.toExponential(2);
+/** Short label for Z dropdown (one value, scientific). */
+function formatMetallicityDropdownLabel(z: number): string {
+  return z.toExponential(1);
 }
 
 function clampRowsToAsset(prev: Row[], d: LoadedSspAsset): Row[] {
@@ -436,7 +429,7 @@ export function SspCompositeSpectrumCanvas({ host }: SspCompositeSpectrumCanvasP
               <div className="ssp-row-label" style={{ color: lineColor }}>
                 SSP {idx + 1}
               </div>
-              <div className="ssp-field ssp-mass-block">
+              <div className="ssp-mass-block">
                 <div className="ssp-mass-row">
                   <span className="ssp-mass-inline-label">Stellar mass formed (M☉)</span>
                   <input
@@ -463,50 +456,58 @@ export function SspCompositeSpectrumCanvas({ host }: SspCompositeSpectrumCanvasP
                   />
                 </div>
               </div>
-              <label className="ssp-field">
-                <span>Stellar age (grid value)</span>
-                <select
-                  disabled={!data}
-                  value={data ? r.ageIdx : 0}
-                  style={accentStyle}
-                  onChange={(e) => updateRow(r.id, { ageIdx: Number.parseInt(e.target.value, 10) })}
-                >
-                  {data
-                    ? data.asset.ageYr.map((yr, i) => (
-                        <option key={`age-${i}`} value={i}>
-                          {formatAgeOption(yr)} — {yr.toExponential(3)} yr
-                        </option>
-                      ))
-                    : (
-                        <option value={0}>Loading…</option>
-                      )}
-                </select>
-              </label>
-              <label className="ssp-field">
-                <span>Metallicity Z (grid value)</span>
-                <select
-                  disabled={!data}
-                  value={data ? r.metalIdx : 0}
-                  style={accentStyle}
-                  onChange={(e) => updateRow(r.id, { metalIdx: Number.parseInt(e.target.value, 10) })}
-                >
-                  {data
-                    ? Array.from({ length: data.nMetal }, (_, i) => {
-                        const z = data.metallicitySorted[i];
-                        return (
-                          <option key={`z-${i}`} value={i}>
-                            {formatMetallicityOption(z)} — Z = {z.toExponential(3)}
+              <div className="ssp-row-right">
+                <label className="ssp-field ssp-field-age">
+                  <span>Stellar age (grid value)</span>
+                  <select
+                    disabled={!data}
+                    value={data ? r.ageIdx : 0}
+                    style={accentStyle}
+                    onChange={(e) => updateRow(r.id, { ageIdx: Number.parseInt(e.target.value, 10) })}
+                  >
+                    {data
+                      ? data.asset.ageYr.map((yr, i) => (
+                          <option key={`age-${i}`} value={i}>
+                            {formatAgeDropdownLabel(yr)}
                           </option>
-                        );
-                      })
-                    : (
-                        <option value={0}>Loading…</option>
-                      )}
-                </select>
-              </label>
-              <button type="button" className="ssp-remove" onClick={() => removeRow(r.id)} disabled={rows.length <= 1}>
-                Remove component
-              </button>
+                        ))
+                      : (
+                          <option value={0}>Loading…</option>
+                        )}
+                  </select>
+                </label>
+                <label className="ssp-field ssp-field-z">
+                  <span>Metallicity Z (grid value)</span>
+                  <select
+                    disabled={!data}
+                    value={data ? r.metalIdx : 0}
+                    style={accentStyle}
+                    onChange={(e) => updateRow(r.id, { metalIdx: Number.parseInt(e.target.value, 10) })}
+                  >
+                    {data
+                      ? Array.from({ length: data.nMetal }, (_, i) => {
+                          const z = data.metallicitySorted[i];
+                          return (
+                            <option key={`z-${i}`} value={i}>
+                              {formatMetallicityDropdownLabel(z)}
+                            </option>
+                          );
+                        })
+                      : (
+                          <option value={0}>Loading…</option>
+                        )}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="ssp-remove"
+                  onClick={() => removeRow(r.id)}
+                  disabled={rows.length <= 1}
+                  aria-label="Remove SSP component"
+                >
+                  Remove
+                </button>
+              </div>
             </div>
             );
           })}

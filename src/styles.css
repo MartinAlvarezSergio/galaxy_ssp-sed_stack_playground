@@ -585,40 +585,99 @@ canvas {
 }
 
 .ssp-row {
-  display: grid;
-  grid-template-columns:
-    minmax(72px, auto)
-    minmax(0, 11.5rem)
-    minmax(100px, 0.85fr)
-    minmax(100px, 0.85fr)
-    auto;
-  gap: 0.65rem 0.85rem;
-  align-items: end;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.65rem 1rem;
   padding: 0.65rem 0.75rem;
 }
 
-@media (max-width: 900px) {
-  .ssp-row {
-    grid-template-columns: minmax(72px, auto) 1fr;
-  }
-
-  .ssp-row .ssp-remove {
-    grid-column: 1 / -1;
-    justify-self: start;
-  }
-}
-
-@media (max-width: 720px) {
-  .ssp-row {
-    grid-template-columns: 1fr;
-  }
-}
-
 .ssp-row-label {
+  flex: 0 0 auto;
+  align-self: end;
   font-size: 0.85rem;
   font-weight: 600;
   color: #d3cdc5;
   padding-bottom: 0.25rem;
+}
+
+.ssp-row .ssp-mass-block {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.ssp-row-right {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: 0.65rem 1rem;
+  flex: 0 1 auto;
+  min-width: 0;
+  /* Inset age / Z / Remove from the card edge (fixed + % of row width) */
+  margin-inline-end: calc(10px + 5%);
+}
+
+.ssp-row .ssp-field-age,
+.ssp-row .ssp-field-z {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 0;
+  width: min(100%, 9.5rem);
+}
+
+.ssp-row .ssp-field-age span,
+.ssp-row .ssp-field-z span {
+  text-align: right;
+  width: 100%;
+}
+
+.ssp-row .ssp-remove {
+  flex: 0 0 auto;
+  align-self: end;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .ssp-row .ssp-mass-block {
+    margin-right: 0;
+    flex: 1 1 100%;
+  }
+
+  .ssp-row-right {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .ssp-row .ssp-field-age,
+  .ssp-row .ssp-field-z {
+    flex: 1 1 calc(50% - 0.5rem);
+    align-items: stretch;
+    width: auto;
+    min-width: min(100%, 12rem);
+  }
+
+  .ssp-row .ssp-field-age span,
+  .ssp-row .ssp-field-z span {
+    text-align: left;
+  }
+
+  .ssp-row .ssp-remove {
+    flex: 0 0 auto;
+    align-self: end;
+  }
+}
+
+@media (max-width: 720px) {
+  .ssp-row .ssp-field-age,
+  .ssp-row .ssp-field-z {
+    flex: 1 1 100%;
+  }
 }
 
 .ssp-field span {
@@ -627,9 +686,10 @@ canvas {
   color: #b8b2a8;
 }
 
-.ssp-row .ssp-field select {
-  width: 80%;
-  max-width: 80%;
+.ssp-row .ssp-field-age select,
+.ssp-row .ssp-field-z select {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .ssp-presets {
