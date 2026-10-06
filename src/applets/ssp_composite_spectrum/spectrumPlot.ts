@@ -22,6 +22,10 @@ export type SpectrumPlotInputs = {
    */
   logXAxisMin?: number;
   logXAxisMax?: number;
+  /** Small "BC03 SSP grid" caption in the top-right corner (default true). */
+  showCaption?: boolean;
+  /** Logical px kept clear on the left (e.g. under an overlay panel); the plot area starts after it. */
+  leftReserve?: number;
 };
 
 function clamp(value: number, lo: number, hi: number): number {
@@ -132,8 +136,11 @@ export function renderSpectrumPlot(
     logYAxisMin,
     logYAxisMax,
     logXAxisMin,
-    logXAxisMax
+    logXAxisMax,
+    showCaption = true,
+    leftReserve = 0
   } = plot;
+  const padL = PAD_L + leftReserve;
   const n = lambdaAngstrom.length;
   if (n < 2) {
     return;
@@ -147,7 +154,7 @@ export function renderSpectrumPlot(
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, width, height);
 
-  const plotW = width - PAD_L - PAD_R;
+  const plotW = width - padL - PAD_R;
   const plotH = height - PAD_T - PAD_B;
 
   let xMin = lambdaAngstrom[0];
@@ -240,7 +247,7 @@ export function renderSpectrumPlot(
   const xToPx = (i: number): number => {
     const lam = lambdaAngstrom[i];
     const xv = logX ? Math.log10(Math.max(lam, 1)) : lam;
-    return PAD_L + clamp(xDataToNorm(xv), 0, 1) * plotW;
+    return padL + clamp(xDataToNorm(xv), 0, 1) * plotW;
   };
 
   const yToPx = (y: number): number => {
@@ -253,7 +260,7 @@ export function renderSpectrumPlot(
     return PAD_T + (1 - clamp(t, 0, 1)) * plotH;
   };
 
-  const xNormToPx = (xNorm: number): number => PAD_L + clamp(xNorm, 0, 1) * plotW;
+  const xNormToPx = (xNorm: number): number => padL + clamp(xNorm, 0, 1) * plotW;
   const yNormToPx = (yNorm: number): number => PAD_T + (1 - clamp(yNorm, 0, 1)) * plotH;
 
   // Minor grid (log decades)
@@ -289,8 +296,8 @@ export function renderSpectrumPlot(
         const yn = (ly - yLogMin) / (yLogMax - yLogMin);
         const yPx = yNormToPx(yn);
         ctx.beginPath();
-        ctx.moveTo(PAD_L, yPx);
-        ctx.lineTo(PAD_L + plotW, yPx);
+        ctx.moveTo(padL, yPx);
+        ctx.lineTo(padL + plotW, yPx);
         ctx.stroke();
       }
     }
@@ -314,15 +321,15 @@ export function renderSpectrumPlot(
     const yn = logY ? (yt - yLogMin) / (yLogMax - yLogMin) : (yt - yLinMin) / (yLinMax - yLinMin);
     const yPx = yNormToPx(yn);
     ctx.beginPath();
-    ctx.moveTo(PAD_L, yPx);
-    ctx.lineTo(PAD_L + plotW, yPx);
+    ctx.moveTo(padL, yPx);
+    ctx.lineTo(padL + plotW, yPx);
     ctx.stroke();
   }
 
   // Plot frame
   ctx.strokeStyle = "rgba(200, 215, 240, 0.35)";
   ctx.lineWidth = 2.4;
-  ctx.strokeRect(PAD_L + 0.5, PAD_T + 0.5, plotW - 1, plotH - 1);
+  ctx.strokeRect(padL + 0.5, PAD_T + 0.5, plotW - 1, plotH - 1);
 
   const strokeCurve = (
     arr: ArrayLike<number>,
@@ -383,13 +390,13 @@ export function renderSpectrumPlot(
     const yn = logY ? (yt - yLogMin) / (yLogMax - yLogMin) : (yt - yLinMin) / (yLinMax - yLinMin);
     const yPx = yNormToPx(yn);
     ctx.beginPath();
-    ctx.moveTo(PAD_L, yPx);
-    ctx.lineTo(PAD_L + tickLen, yPx);
+    ctx.moveTo(padL, yPx);
+    ctx.lineTo(padL + tickLen, yPx);
     ctx.stroke();
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
     const yLabel = logY ? `${yt}` : formatAxisNumber(yt);
-    ctx.fillText(yLabel, PAD_L - 14, yPx);
+    ctx.fillText(yLabel, padL - 14, yPx);
   }
 
   // Axis titles
@@ -400,10 +407,10 @@ export function renderSpectrumPlot(
   const angstrom = "\u212b";
   const lambda = "\u03bb";
   const xTitle = logX ? `log\u2081\u2080(${lambda} / ${angstrom})` : `${lambda} (${angstrom})`;
-  ctx.fillText(xTitle, PAD_L + plotW / 2, height - 40);
+  ctx.fillText(xTitle, padL + plotW / 2, height - 40);
 
   ctx.save();
-  ctx.translate(20, PAD_T + plotH / 2);
+  ctx.translate(20 + leftReserve, PAD_T + plotH / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.textAlign = "center";
   ctx.textBaseline = "bottom";
@@ -414,9 +421,11 @@ export function renderSpectrumPlot(
   ctx.restore();
 
   // Panel caption
-  ctx.fillStyle = "rgba(170, 185, 210, 0.75)";
-  ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
-  ctx.textAlign = "right";
-  ctx.textBaseline = "top";
-  ctx.fillText("BC03 SSP grid · summed composite spectrum", PAD_L + plotW, 6);
+  if (showCaption) {
+    ctx.fillStyle = "rgba(170, 185, 210, 0.75)";
+    ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = "right";
+    ctx.textBaseline = "top";
+    ctx.fillText("BC03 SSP grid · summed composite spectrum", padL + plotW, 6);
+  }
 }

@@ -1,0 +1,145 @@
+/* SSP composite spectrum: small additions to the applet stage kit, scoped to .ssp-stage.
+   This file can load before styles.css, so selectors out-rank the kit's instead of relying on order. */
+
+/* The component rows need more room than the default 240 px panel. */
+/* Titles are passed in capitals (see SECTION in the component) so λ is not uppercased to Λ. */
+.ssp-stage .stage-section > summary {
+  text-transform: none;
+}
+
+.ssp-stage-rows {
+  display: grid;
+  gap: 4px;
+  container-type: inline-size;
+}
+
+.ssp-stage-row {
+  display: grid;
+  grid-template-columns: 2.2rem 5.85rem minmax(0, 1.3fr) minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 3px 3px 6px;
+  border-left: 3px solid var(--ssp-color, rgba(255, 255, 255, 0.3));
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.ssp-stage-head {
+  padding-top: 0;
+  padding-bottom: 0;
+  border-left-color: transparent;
+  background: none;
+  font-size: 0.66rem;
+  line-height: 1.2;
+  /* Labels may take two lines (e.g. "Stellar mass formed (M☉)"); keep them on their fields. */
+  align-items: end;
+  color: rgba(235, 232, 226, 0.6);
+}
+
+.ssp-stage-tag {
+  color: var(--ssp-color);
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ssp-stage-mass {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ssp-stage-mul {
+  font-size: 0.74rem;
+  color: rgba(235, 232, 226, 0.78);
+  white-space: nowrap;
+  user-select: none;
+}
+
+:root .ssp-stage .ssp-stage-row input[type="number"],
+:root .ssp-stage .ssp-stage-row select {
+  min-width: 0;
+  padding: 0.18rem 0.22rem;
+  border-radius: 6px;
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+:root .ssp-stage .ssp-stage-row input[type="number"] {
+  text-align: center;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.ssp-stage-row input[type="number"]::-webkit-outer-spin-button,
+.ssp-stage-row input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+:root .ssp-stage .ssp-stage-row .ssp-stage-mantissa {
+  flex: 0 0 2.4rem;
+  width: 2.4rem;
+}
+
+:root .ssp-stage .ssp-stage-row .ssp-stage-exp {
+  flex: 0 0 1.9rem;
+  width: 1.9rem;
+}
+
+:root .ssp-stage .ssp-stage-row .stage-icon {
+  width: 24px;
+  height: 24px;
+}
+
+/* Narrow panel (phones): each row wraps to two lines, mass on the first and age / Z on the
+   second; the header row follows the same template so its labels stay above their fields. */
+@container (max-width: 334px) {
+  .ssp-stage-row {
+    grid-template-columns: 2.2rem 5.85rem minmax(0, 1fr) 24px;
+    grid-template-areas:
+      "tag mass . del"
+      "age age z z";
+    row-gap: 3px;
+  }
+
+  .ssp-stage-row > :nth-child(1) {
+    grid-area: tag;
+  }
+
+  .ssp-stage-row > :nth-child(2) {
+    grid-area: mass;
+  }
+
+  .ssp-stage-row > :nth-child(3) {
+    grid-area: age;
+  }
+
+  .ssp-stage-row > :nth-child(4) {
+    grid-area: z;
+  }
+
+  .ssp-stage-row > :nth-child(5) {
+    grid-area: del;
+  }
+}
+
+/* min / max sliders side by side */
+.ssp-stage-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.ssp-stage-error {
+  display: grid;
+  gap: 8px;
+  color: #ffd2c8;
+}
+
+@media (max-width: 760px) {
+  .ssp-stage .stage-controls {
+    width: auto;
+  }
+}

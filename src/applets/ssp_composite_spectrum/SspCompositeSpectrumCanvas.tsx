@@ -1,6 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { setLogicalTransform } from "../../core/canvasScale";
 import { AppletHostAdapter } from "../../core/host";
-import { ControlCard } from "../../ui/ControlCard";
+import { AppletStage } from "../../ui/stage/AppletStage";
+import {
+  StageDivider,
+  StageIconButton,
+  StagePillButton,
+  StageReadout,
+  StageSection,
+  StageSlider,
+  StageToggle
+} from "../../ui/stage/StageControls";
 import { clearSspAssetCache, defaultSspAssetUrl, loadSspAssetCached, type LoadedSspAsset } from "./loadSspAsset";
 import { combineMassMsun, normalizeMassScientific, splitMassMsun } from "./massScientific";
 import { computeSpectra } from "./spectrum";
@@ -8,6 +18,7 @@ import { renderSpectrumPlot } from "./spectrumPlot";
 import { SSP_COMPONENT_LINE_COLORS } from "./sspColors";
 import { resolvePreset, SSP_PRESETS, type SspPreset } from "./presets";
 import type { SspComponent } from "./types";
+import "./ssp-stage.css";
 
 type SspCompositeSpectrumCanvasProps = {
   host?: AppletHostAdapter;
@@ -25,8 +36,13 @@ type Row = {
   metalIdx: number;
 };
 
+/** Logical plot size; the stage keeps this aspect ratio and the plot is drawn in these units. */
 const PLOT_W = 920;
 const PLOT_H = 400;
+/** Controls panel width (CSS px). While it is open the plot starts to its right. */
+const PANEL_W = 364;
+/** Panel's left inset plus a small gap, in CSS px. */
+const PANEL_GUTTER = 20;
 const MASS_EXP_MIN = -4;
 const MASS_EXP_MAX = 15;
 const Y_LOG_AXIS_SLIDER_MIN = 1;
@@ -38,6 +54,32 @@ const X_AXIS_LOG_SLIDER_MIN = 0;
 const X_AXIS_LOG_SLIDER_MAX = 8;
 const DEFAULT_X_AXIS_LOG_MIN = 2;
 const DEFAULT_X_AXIS_LOG_MAX = 5;
+
+const TIP = {
+  logX: "On: wavelength axis in log₁₀(λ/Å). Off: linear λ in Å.",
+  logY: "On: luminosity axis in log₁₀ L_λ. Off: linear L_λ, scaled to the curves.",
+  reset: "Back to the three starting components and the default axes.",
+  components:
+    "Define each SSP by mass, age, and metallicity. The galaxy spectrum is the sum of the SSP spectra.",
+  mass: "Stellar mass formed in this burst, in scientific notation a × 10^b M☉. Luminosity scales in proportion.",
+  age: "Time since the burst formed (grid value: chosen from the ages of the preprocessed BC03 grid).",
+  metallicity:
+    "Mass fraction of elements heavier than helium; Z = 0.02 is solar (grid value: chosen from the preprocessed BC03 grid).",
+  add: "Add another SSP: 1 × 10^8 M☉ at a mid-grid age and Z.",
+  yMin: "Bottom of the plot, as log₁₀ L_λ (erg s⁻¹ Å⁻¹).",
+  yMax: "Top of the plot, as log₁₀ L_λ (erg s⁻¹ Å⁻¹).",
+  xMin: "Shortest wavelength shown, as log₁₀(λ/Å).",
+  xMax: "Longest wavelength shown, as log₁₀(λ/Å).",
+  totalMass: "Sum of the SSP masses."
+} as const;
+
+/** Section titles are written in capitals here (see ssp-stage.css) so CSS never turns λ into Λ. */
+const SECTION = {
+  components: "STELLAR POPULATION COMPONENTS",
+  presets: "EXAMPLE STAR-FORMATION HISTORIES",
+  yWindow: "Y-AXIS WINDOW (LOG L_λ)",
+  xWindow: "X-AXIS WAVELENGTH WINDOW (LOG₁₀ λ/Å)"
+} as const;
 
 function clampInt(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, Math.round(n)));
@@ -114,6 +156,31 @@ function clampRowsToAsset(prev: Row[], d: LoadedSspAsset): Row[] {
   }));
 }
 
+const SUPERSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹";
+
+function superscript(n: number): string {
+  return String(n)
+    .replace(/-/g, "⁻")
+    .replace(/\d/g, (d) => SUPERSCRIPT_DIGITS[Number(d)]);
+}
+
+/** e.g. "7.0 × 10⁸ M☉" */
+function formatTotalMass(massMsun: number): string {
+  if (massMsun === 0) {
+    return "0 M☉";
+  }
+  if (!Number.isFinite(massMsun) || massMsun < 0) {
+    return "—";
+  }
+  const { mantissa, exp10 } = splitMassMsun(massMsun);
+  const rounded = Number(mantissa.toFixed(1));
+  return rounded >= 10 ? `1.0 × 10${superscript(exp10 + 1)} M☉` : `${rounded.toFixed(1)} × 10${superscript(exp10)} M☉`;
+}
+
+function tipProps(tip: string): { title: string; "data-hover-help": string } {
+  return { title: tip, "data-hover-help": tip };
+}
+
 export function SspCompositeSpectrumCanvas({ host }: SspCompositeSpectrumCanvasProps): JSX.Element {
   void host;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -166,16 +233,23 @@ export function SspCompositeSpectrumCanvas({ host }: SspCompositeSpectrumCanvasP
     return computeSpectra(data, components);
   }, [data, components]);
 
+  const [controlsVisible, setControlsVisible] = useState(true);
+
   const redraw = useCallback(() => {
     const c = canvasRef.current;
-    if (!c || !spectra) {
+    const ctx = c?.getContext("2d");
+    if (!c || !ctx) {
       return;
     }
-    const ctx = c.getContext("2d");
-    if (!ctx) {
+    // On small screens the panel sits below the plot, so nothing needs to be kept clear.
+    const overlaid = controlsVisible && !window.matchMedia("(max-width: 760px)").matches;
+    const leftReserve = overlaid && c.clientWidth > 0 ? ((PANEL_W + PANEL_GUTTER) * PLOT_W) / c.clientWidth : 0;
+    setLogicalTransform(ctx, PLOT_W);
+    if (!spectra) {
+      ctx.clearRect(0, 0, PLOT_W, PLOT_H);
       return;
     }
-    renderSpectrumPlot(ctx, c.width, c.height, {
+    renderSpectrumPlot(ctx, PLOT_W, PLOT_H, {
       lambdaAngstrom: spectra.lambdaAngstrom,
       perComponent: spectra.perComponent,
       total: spectra.total,
@@ -184,9 +258,12 @@ export function SspCompositeSpectrumCanvas({ host }: SspCompositeSpectrumCanvasP
       logYAxisMin: logY ? yLogAxisMin : undefined,
       logYAxisMax: logY ? yLogAxisMax : undefined,
       logXAxisMin: xAxisLogMin,
-      logXAxisMax: xAxisLogMax
+      logXAxisMax: xAxisLogMax,
+      // The readouts panel sits over that corner; the attribution is in the info panel.
+      showCaption: false,
+      leftReserve
     });
-  }, [spectra, logX, logY, yLogAxisMin, yLogAxisMax, xAxisLogMin, xAxisLogMax]);
+  }, [spectra, logX, logY, yLogAxisMin, yLogAxisMax, xAxisLogMin, xAxisLogMax, controlsVisible]);
 
   useEffect(() => {
     redraw();
@@ -254,6 +331,16 @@ export function SspCompositeSpectrumCanvas({ host }: SspCompositeSpectrumCanvasP
     );
   };
 
+  const resetAll = (): void => {
+    setRows(data ? clampRowsToAsset(defaultRows(), data) : defaultRows());
+    setLogX(true);
+    setLogY(true);
+    setYLogAxisMin(DEFAULT_Y_LOG_AXIS_MIN);
+    setYLogAxisMax(DEFAULT_Y_LOG_AXIS_MAX);
+    setXAxisLogMin(DEFAULT_X_AXIS_LOG_MIN);
+    setXAxisLogMax(DEFAULT_X_AXIS_LOG_MAX);
+  };
+
   const retryLoad = (): void => {
     clearSspAssetCache();
     setLoadError(null);
@@ -266,257 +353,273 @@ export function SspCompositeSpectrumCanvas({ host }: SspCompositeSpectrumCanvasP
       .catch((e: unknown) => setLoadError(e instanceof Error ? e.message : String(e)));
   };
 
-  return (
-    <div className="ssp-composite-layout">
-      <header className="ssp-composite-header">
-        <h2>Composite Stellar Spectrum (BC03)</h2>
-        <p className="subtle">
-          Build a galaxy spectrum by summing simple stellar populations (SSPs) from the Bruzual &amp; Charlot 2003 grid.
-        </p>
-      </header>
+  const onLogYChange = (on: boolean): void => {
+    setLogY(on);
+    if (on) {
+      const { min, max } = enforceYLogAxisOrder(yLogAxisMin, yLogAxisMax);
+      setYLogAxisMin(min);
+      setYLogAxisMax(max);
+    }
+  };
 
-      {loadError ? (
-        <section className="panel card">
-          <p>Could not load the BC03 SSP asset: {loadError}</p>
-          <button type="button" onClick={retryLoad}>
-            Reload asset
-          </button>
-        </section>
-      ) : null}
+  const setYWindow = (lo: number, hi: number): void => {
+    const { min, max } = enforceYLogAxisOrder(lo, hi);
+    setYLogAxisMin(min);
+    setYLogAxisMax(max);
+  };
 
-      <div className="ssp-composite-plot-wrap">
-        <canvas
-          ref={canvasRef}
-          width={PLOT_W}
-          height={PLOT_H}
-          className="ssp-composite-canvas"
-          aria-label="Spectral energy distribution plot"
-        />
+  const setXWindow = (lo: number, hi: number): void => {
+    const { min, max } = enforceXLogAxisOrder(lo, hi);
+    setXAxisLogMin(min);
+    setXAxisLogMax(max);
+  };
+
+  const totalMassMsun = rows.reduce((sum, r) => sum + combineMassMsun(r.massMantissa, r.massExp10), 0);
+
+  const toolbar = (
+    <>
+      <StageToggle label="Log wavelength axis" on={logX} tip={TIP.logX} onChange={setLogX} />
+      <StageToggle label="Log luminosity axis" on={logY} tip={TIP.logY} onChange={onLogYChange} />
+      <StageDivider />
+      <StageIconButton icon="reset" label="Reset" tip={TIP.reset} onClick={resetAll} />
+    </>
+  );
+
+  const componentRows = (
+    <div className="ssp-stage-rows">
+      <div className="ssp-stage-row ssp-stage-head" aria-hidden="true">
+        <span />
+        <span {...tipProps(TIP.mass)}>Stellar mass formed (M☉)</span>
+        <span {...tipProps(TIP.age)}>Stellar age</span>
+        <span {...tipProps(TIP.metallicity)}>Metallicity Z</span>
+        <span />
       </div>
-
-      <div className="ssp-composite-toggles">
-        <label>
-          <input type="checkbox" checked={logX} onChange={(e) => setLogX(e.target.checked)} /> Log wavelength axis
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={logY}
-            onChange={(e) => {
-              const on = e.target.checked;
-              setLogY(on);
-              if (on) {
-                const { min, max } = enforceYLogAxisOrder(yLogAxisMin, yLogAxisMax);
-                setYLogAxisMin(min);
-                setYLogAxisMax(max);
-              }
-            }}
-          />{" "}
-          Log luminosity axis
-        </label>
-      </div>
-
-      {logY ? (
-        <div className="panel card ssp-y-axis-oneline" role="group" aria-label="Log L lambda axis range">
-          <div className="ssp-y-oneline-lead">
-            <strong>Y-axis window (log L_λ)</strong>.
-          </div>
-          <label className="ssp-y-inline-range">
-            <span>y-axis min</span>
-            <span className="ssp-y-slider-value">{yLogAxisMin}</span>
-            <input
-              type="range"
-              min={Y_LOG_AXIS_SLIDER_MIN}
-              max={Y_LOG_AXIS_SLIDER_MAX}
-              value={yLogAxisMin}
-              onChange={(e) => {
-                const v = Number.parseInt(e.target.value, 10);
-                const { min, max } = enforceYLogAxisOrder(v, yLogAxisMax);
-                setYLogAxisMin(min);
-                setYLogAxisMax(max);
-              }}
-            />
-          </label>
-          <label className="ssp-y-inline-range">
-            <span>y-axis max</span>
-            <span className="ssp-y-slider-value">{yLogAxisMax}</span>
-            <input
-              type="range"
-              min={Y_LOG_AXIS_SLIDER_MIN}
-              max={Y_LOG_AXIS_SLIDER_MAX}
-              value={yLogAxisMax}
-              onChange={(e) => {
-                const v = Number.parseInt(e.target.value, 10);
-                const { min, max } = enforceYLogAxisOrder(yLogAxisMin, v);
-                setYLogAxisMin(min);
-                setYLogAxisMax(max);
-              }}
-            />
-          </label>
-        </div>
-      ) : null}
-
-      {spectra ? (
-        <div className="panel card ssp-x-axis-oneline" role="group" aria-label="Wavelength axis range">
-          <div className="ssp-y-oneline-lead">
-            <strong>X-axis wavelength window</strong> in log₁₀(λ/Å).
-          </div>
-          <label className="ssp-y-inline-range">
-            <span>x-axis min</span>
-            <span className="ssp-y-slider-value">{xAxisLogMin}</span>
-            <input
-              type="range"
-              min={X_AXIS_LOG_SLIDER_MIN}
-              max={X_AXIS_LOG_SLIDER_MAX}
-              value={xAxisLogMin}
-              onChange={(e) => {
-                const v = Number.parseInt(e.target.value, 10);
-                const { min, max } = enforceXLogAxisOrder(v, xAxisLogMax);
-                setXAxisLogMin(min);
-                setXAxisLogMax(max);
-              }}
-            />
-          </label>
-          <label className="ssp-y-inline-range">
-            <span>x-axis max</span>
-            <span className="ssp-y-slider-value">{xAxisLogMax}</span>
-            <input
-              type="range"
-              min={X_AXIS_LOG_SLIDER_MIN}
-              max={X_AXIS_LOG_SLIDER_MAX}
-              value={xAxisLogMax}
-              onChange={(e) => {
-                const v = Number.parseInt(e.target.value, 10);
-                const { min, max } = enforceXLogAxisOrder(xAxisLogMin, v);
-                setXAxisLogMin(min);
-                setXAxisLogMax(max);
-              }}
-            />
-          </label>
-        </div>
-      ) : null}
-
-      <ControlCard
-        title="Stellar Population Components"
-        subtitle="Define each SSP by mass, age, and metallicity. Mass uses scientific notation (a × 10^b M☉); age and Z are selected from the preprocessed BC03 grid."
-      >
-        <div className="ssp-presets" role="group" aria-label="SSP scientific presets">
-          <div className="ssp-presets-label">Example star-formation histories</div>
-          <div className="ssp-presets-buttons">
-            {SSP_PRESETS.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                title={p.tip}
-                disabled={!data}
-                onClick={() => applyPreset(p)}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="ssp-rows">
-          {rows.map((r, idx) => {
-            const lineColor = SSP_COMPONENT_LINE_COLORS[idx % SSP_COMPONENT_LINE_COLORS.length];
-            const accentStyle = { borderColor: lineColor, boxShadow: `0 0 0 1px ${lineColor}` };
-            return (
-            <div
-              key={r.id}
-              className="ssp-row card subtle-border"
-              style={{ borderLeft: `4px solid ${lineColor}` }}
+      {rows.map((r, idx) => {
+        const lineColor = SSP_COMPONENT_LINE_COLORS[idx % SSP_COMPONENT_LINE_COLORS.length];
+        return (
+          <div
+            key={r.id}
+            className="ssp-stage-row"
+            role="group"
+            aria-label={`SSP ${idx + 1}`}
+            style={{ "--ssp-color": lineColor } as CSSProperties}
+          >
+            <span className="ssp-stage-tag">SSP {idx + 1}</span>
+            <span className="ssp-stage-mass" {...tipProps(TIP.mass)}>
+              <input
+                type="number"
+                className="ssp-stage-mantissa"
+                min={0}
+                step={0.01}
+                value={r.massMantissa}
+                onChange={(e) => setMassMantissa(r.id, Number(e.target.value))}
+                aria-label="Mass mantissa a in a times ten to the b solar masses"
+              />
+              <span className="ssp-stage-mul">×10</span>
+              <input
+                type="number"
+                className="ssp-stage-exp"
+                step={1}
+                value={r.massExp10}
+                min={MASS_EXP_MIN}
+                max={MASS_EXP_MAX}
+                onChange={(e) => setMassExp10(r.id, Number(e.target.value))}
+                aria-label="Mass exponent b in a times ten to the b solar masses"
+              />
+            </span>
+            <select
+              disabled={!data}
+              value={data ? r.ageIdx : 0}
+              aria-label="Stellar age"
+              {...tipProps(TIP.age)}
+              onChange={(e) => updateRow(r.id, { ageIdx: Number.parseInt(e.target.value, 10) })}
             >
-              <div className="ssp-row-label" style={{ color: lineColor }}>
-                SSP {idx + 1}
-              </div>
-              <div className="ssp-mass-block">
-                <div className="ssp-mass-row">
-                  <span className="ssp-mass-inline-label">Stellar mass formed (M☉)</span>
-                  <input
-                    type="number"
-                    className="ssp-mantissa"
-                    min={0}
-                    step={0.01}
-                    value={r.massMantissa}
-                    style={accentStyle}
-                    onChange={(e) => setMassMantissa(r.id, Number(e.target.value))}
-                    aria-label="Mass mantissa a in a times ten to the b solar masses"
-                  />
-                  <span className="ssp-mul">×10</span>
-                  <input
-                    type="number"
-                    className="ssp-exp"
-                    step={1}
-                    value={r.massExp10}
-                    min={MASS_EXP_MIN}
-                    max={MASS_EXP_MAX}
-                    style={accentStyle}
-                    onChange={(e) => setMassExp10(r.id, Number(e.target.value))}
-                    aria-label="Mass exponent b in a times ten to the b solar masses"
-                  />
-                </div>
-              </div>
-              <div className="ssp-row-right">
-                <label className="ssp-field ssp-field-age">
-                  <span>Stellar age (grid value)</span>
-                  <select
-                    disabled={!data}
-                    value={data ? r.ageIdx : 0}
-                    style={accentStyle}
-                    onChange={(e) => updateRow(r.id, { ageIdx: Number.parseInt(e.target.value, 10) })}
-                  >
-                    {data
-                      ? data.asset.ageYr.map((yr, i) => (
-                          <option key={`age-${i}`} value={i}>
-                            {formatAgeDropdownLabel(yr)}
-                          </option>
-                        ))
-                      : (
-                          <option value={0}>Loading…</option>
-                        )}
-                  </select>
-                </label>
-                <label className="ssp-field ssp-field-z">
-                  <span>Metallicity Z (grid value)</span>
-                  <select
-                    disabled={!data}
-                    value={data ? r.metalIdx : 0}
-                    style={accentStyle}
-                    onChange={(e) => updateRow(r.id, { metalIdx: Number.parseInt(e.target.value, 10) })}
-                  >
-                    {data
-                      ? Array.from({ length: data.nMetal }, (_, i) => {
-                          const z = data.metallicitySorted[i];
-                          return (
-                            <option key={`z-${i}`} value={i}>
-                              {formatMetallicityDropdownLabel(z)}
-                            </option>
-                          );
-                        })
-                      : (
-                          <option value={0}>Loading…</option>
-                        )}
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  className="ssp-remove"
-                  onClick={() => removeRow(r.id)}
-                  disabled={rows.length <= 1}
-                  aria-label="Remove SSP component"
-                >
-                  Remove
-                </button>
-              </div>
-            </div>
-            );
-          })}
-        </div>
-        <button type="button" className="ssp-add" onClick={addRow}>
-          Add component
-        </button>
-      </ControlCard>
-
+              {data ? (
+                data.asset.ageYr.map((yr, i) => (
+                  <option key={`age-${i}`} value={i}>
+                    {formatAgeDropdownLabel(yr)}
+                  </option>
+                ))
+              ) : (
+                <option value={0}>Loading…</option>
+              )}
+            </select>
+            <select
+              disabled={!data}
+              value={data ? r.metalIdx : 0}
+              aria-label="Metallicity Z"
+              {...tipProps(TIP.metallicity)}
+              onChange={(e) => updateRow(r.id, { metalIdx: Number.parseInt(e.target.value, 10) })}
+            >
+              {data ? (
+                Array.from({ length: data.nMetal }, (_, i) => (
+                  <option key={`z-${i}`} value={i}>
+                    {formatMetallicityDropdownLabel(data.metallicitySorted[i])}
+                  </option>
+                ))
+              ) : (
+                <option value={0}>Loading…</option>
+              )}
+            </select>
+            <StageIconButton
+              icon="trash"
+              label="Remove SSP component"
+              disabled={rows.length <= 1}
+              onClick={() => removeRow(r.id)}
+            />
+          </div>
+        );
+      })}
     </div>
+  );
+
+  const controls = (
+    <>
+      <StageSection title={SECTION.components}>
+        <div className="ssp-stage-section-tip" {...tipProps(TIP.components)}>
+          {componentRows}
+        </div>
+        <div className="stage-pills">
+          <StagePillButton label="Add component" tip={TIP.add} disabled={!data} onClick={addRow} />
+        </div>
+      </StageSection>
+      <StageSection title={SECTION.presets}>
+        <div className="stage-pills" role="group" aria-label="SSP scientific presets">
+          {SSP_PRESETS.map((p) => (
+            <StagePillButton key={p.id} label={p.label} tip={p.tip} disabled={!data} onClick={() => applyPreset(p)} />
+          ))}
+        </div>
+      </StageSection>
+      {logY ? (
+        <StageSection title={SECTION.yWindow}>
+          <div className="ssp-stage-pair" role="group" aria-label="Log L lambda axis range">
+            <StageSlider
+              label="y-axis min"
+              display={String(yLogAxisMin)}
+              value={yLogAxisMin}
+              min={Y_LOG_AXIS_SLIDER_MIN}
+              max={Y_LOG_AXIS_SLIDER_MAX}
+              step={1}
+              tip={TIP.yMin}
+              onChange={(v) => setYWindow(v, yLogAxisMax)}
+            />
+            <StageSlider
+              label="y-axis max"
+              display={String(yLogAxisMax)}
+              value={yLogAxisMax}
+              min={Y_LOG_AXIS_SLIDER_MIN}
+              max={Y_LOG_AXIS_SLIDER_MAX}
+              step={1}
+              tip={TIP.yMax}
+              onChange={(v) => setYWindow(yLogAxisMin, v)}
+            />
+          </div>
+        </StageSection>
+      ) : null}
+      {spectra ? (
+        <StageSection title={SECTION.xWindow}>
+          <div className="ssp-stage-pair" role="group" aria-label="Wavelength axis range">
+            <StageSlider
+              label="x-axis min"
+              display={String(xAxisLogMin)}
+              value={xAxisLogMin}
+              min={X_AXIS_LOG_SLIDER_MIN}
+              max={X_AXIS_LOG_SLIDER_MAX}
+              step={1}
+              tip={TIP.xMin}
+              onChange={(v) => setXWindow(v, xAxisLogMax)}
+            />
+            <StageSlider
+              label="x-axis max"
+              display={String(xAxisLogMax)}
+              value={xAxisLogMax}
+              min={X_AXIS_LOG_SLIDER_MIN}
+              max={X_AXIS_LOG_SLIDER_MAX}
+              step={1}
+              tip={TIP.xMax}
+              onChange={(v) => setXWindow(xAxisLogMin, v)}
+            />
+          </div>
+        </StageSection>
+      ) : null}
+    </>
+  );
+
+  const readouts = loadError ? (
+    <div className="ssp-stage-error" role="alert">
+      <span>Could not load the BC03 SSP asset: {loadError}</span>
+      <div className="stage-pills">
+        <StagePillButton label="Reload asset" onClick={retryLoad} />
+      </div>
+    </div>
+  ) : data ? (
+    <>
+      <StageReadout label="Total mass" value={formatTotalMass(totalMassMsun)} tip={TIP.totalMass} />
+      <StageReadout label="Components" value={String(rows.length)} />
+    </>
+  ) : (
+    <StageReadout label="Loading BC03 grid…" value="" muted />
+  );
+
+  const info = (
+    <>
+      <h4>Reading the plot</h4>
+      <ul>
+        <li>
+          Each coloured line is one simple stellar population (SSP), in the colour of its row. The dashed white line is
+          their sum: the composite galaxy spectrum.
+        </li>
+        <li>
+          Wavelength λ is in Å, shown as log₁₀(λ/Å) on the log wavelength axis. Luminosity density L_λ is in erg s⁻¹
+          Å⁻¹, shown as log₁₀ L_λ on the log luminosity axis.
+        </li>
+        <li>
+          The y-axis window sets the plotted range of log₁₀ L_λ (log luminosity axis only); the x-axis window sets the
+          wavelength range in log₁₀(λ/Å).
+        </li>
+      </ul>
+      <h4>Components</h4>
+      <ul>
+        <li>
+          Build a galaxy spectrum by summing simple stellar populations (SSPs) from the Bruzual &amp; Charlot 2003 grid.
+          Each SSP is defined by mass, age, and metallicity.
+        </li>
+        <li>Mass uses scientific notation (a × 10^b M☉); the luminosity of an SSP scales in proportion to its mass.</li>
+        <li>Stellar age and metallicity Z are grid values: they are selected from the preprocessed BC03 grid.</li>
+      </ul>
+      <h4>Example star-formation histories</h4>
+      <ul>
+        <li>
+          Schematic presets: toy splits of the stellar mass into a few bursts, each snapped to the nearest grid age and
+          Z. They are not fitted to any specific galaxy.
+        </li>
+      </ul>
+      <h4>Model</h4>
+      <ul>
+        <li>Spectra: Bruzual &amp; Charlot (2003) SSP models (BC03), a preprocessed subset of the grid.</li>
+        <li>
+          Each component is a single burst of stars with one age and one metallicity; a few bursts stand in for a
+          continuous star-formation history.
+        </li>
+        <li>Intrinsic spectra: no dust attenuation or redshift is applied.</li>
+      </ul>
+    </>
+  );
+
+  return (
+    <AppletStage
+      logicalWidth={PLOT_W}
+      logicalHeight={PLOT_H}
+      canvasRef={canvasRef}
+      canvasLabel="Spectral energy distribution plot"
+      onCanvasResize={redraw}
+      toolbar={toolbar}
+      controls={controls}
+      readouts={readouts}
+      info={info}
+      rootClassName="ssp-stage"
+      controlsWidth={PANEL_W}
+      onControlsVisibilityChange={setControlsVisible}
+    />
   );
 }
